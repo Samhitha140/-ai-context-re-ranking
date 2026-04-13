@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🔍 AI Contextual Search Re-Ranker
 
 An AI-powered search system that **personalizes top 10 results based on who you are**.
@@ -147,3 +148,6 @@ smart-search/
 ---
 
 Built with Tavily Search API (free) + Google Gemini API (free)
+=======
+# -ai-context-re-ranking
+>>>>>>> 7fbe055b8b747d32eebfe5d49f187f95236dc679
