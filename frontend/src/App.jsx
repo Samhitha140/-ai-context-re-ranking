@@ -60,7 +60,6 @@ const PERSONAS = [
   },
 ]
 
-// Tag colors — using backgroundColor (not bg) so React inline styles work correctly
 const TAG_STYLES = {
   free:          { backgroundColor: '#d1fae5', color: '#065f46' },
   'open-source': { backgroundColor: '#d1fae5', color: '#065f46' },
@@ -84,11 +83,10 @@ const DEFAULT_TAG_STYLE = { backgroundColor: '#f3f4f6', color: '#374151' }
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3001'
 
-// Colour the score bar: green for high, yellow for mid, red for low
 function scoreColor(score) {
-  if (score >= 0.75) return '#10b981' // green
-  if (score >= 0.5)  return '#f59e0b' // amber
-  return '#ef4444'                    // red
+  if (score >= 0.75) return '#10b981'
+  if (score >= 0.5)  return '#f59e0b'
+  return '#ef4444'
 }
 
 export default function App() {
@@ -119,7 +117,11 @@ export default function App() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Search failed')
       setResults(data.results || [])
-      setMeta({ totalFetched: data.totalFetched, persona: selectedPersona })
+      setMeta({
+        totalFetched: data.totalFetched,
+        persona: selectedPersona,
+        highRelevanceCount: data.highRelevanceCount,
+      })
     } catch (err) {
       setError(err.message)
     } finally {
@@ -129,7 +131,7 @@ export default function App() {
 
   const handleKey = (e) => { if (e.key === 'Enter') handleSearch() }
 
-  const toolCount = results.filter(r => r.tags?.includes('tool') || r.relevanceScore >= 0.75).length
+  const highRelevanceCount = results.filter(r => r.relevanceScore >= 0.75).length
 
   return (
     <div className="app">
@@ -179,7 +181,7 @@ export default function App() {
                 className="search-input"
                 type="text"
                 placeholder={selectedPersona
-                  ? `Search as a ${selectedPersona.label} — e.g. "free AI photo tools"...`
+                  ? `Search as a ${selectedPersona.label} — e.g. "research papers on AI"...`
                   : 'Select your persona first, then search...'}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
@@ -200,7 +202,7 @@ export default function App() {
               <span className="hint-icon">{selectedPersona.icon}</span>
               <span>
                 <strong>{selectedPersona.label} mode active.</strong> {selectedPersona.desc}.
-                Blog articles will be ranked lower — actual tools and resources come first.
+                Results are personalised for you — max 2 blog articles, always at the bottom.
               </span>
             </div>
           )}
@@ -215,7 +217,7 @@ export default function App() {
               <div className="loading-spinner"/>
               <div className="loading-text">
                 <div>Fetching real results · AI re-ranking for <strong>{selectedPersona?.icon} {selectedPersona?.label}</strong>...</div>
-                <div className="loading-sub">Tool websites are being prioritized over blog articles</div>
+                <div className="loading-sub">Personalising results for your persona · blogs limited to 2</div>
               </div>
             </div>
             {[1,2,3].map(i => (
@@ -234,7 +236,11 @@ export default function App() {
             <div className="results-header">
               <div className="results-meta">
                 <strong>{results.length}</strong> results for "<em>{query}</em>"
-                {meta && <span className="meta-sub"> · from {meta.totalFetched} raw results · {toolCount} high-relevance</span>}
+                {meta && (
+                  <span className="meta-sub">
+                    {' '}· from {meta.totalFetched} raw results · {highRelevanceCount} high-relevance
+                  </span>
+                )}
               </div>
               <div className="persona-badge">
                 {selectedPersona?.icon} {selectedPersona?.label}
@@ -243,7 +249,8 @@ export default function App() {
 
             <div className="results-list">
               {results.map((r) => {
-                const isBlog = r.tags?.includes('blog') || r.tags?.includes('article') || r.relevanceScore < 0.45
+                // FIX: use resultType from backend — reliable, not score-threshold based
+                const isBlog = r.resultType === 'blog'
                 return (
                   <div key={r.rank} className={`result-card ${isBlog ? 'result-card-dim' : ''}`}>
                     <div className="result-top">
@@ -312,7 +319,7 @@ export default function App() {
       </main>
 
       <footer className="footer">
-        Built with Tavily Search API (free) + Google Gemini AI (free) · Tool websites prioritized over blog articles
+        Built with Tavily Search API · Google Gemini AI · Personalised per persona · Max 2 blog results
       </footer>
     </div>
   )

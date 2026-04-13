@@ -1,7 +1,8 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
 require('dotenv').config();
+
+// NOTE: node-fetch removed — using Node 18+ native fetch (works on Vercel + VS Code)
 
 const app = express();
 app.use(cors());
@@ -13,43 +14,58 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// ─── FIX 1: HARD BLACKLIST ────────────────────────────────────────────────────
-// These domains are NEVER useful as direct tool results. Block them completely.
+// ─── BLACKLIST: removed linkedin.com so job seekers get results ───────────────
 const BLACKLISTED_DOMAINS = [
   'facebook.com', 'reddit.com', 'twitter.com', 'x.com',
   'instagram.com', 'tiktok.com', 'pinterest.com', 'quora.com',
-  'linkedin.com', 'youtube.com',
+  'youtube.com',
+  // linkedin.com REMOVED — job seekers need linkedin.com/jobs results
 ];
 
 function isBlacklisted(url = '') {
   return BLACKLISTED_DOMAINS.some(d => url.toLowerCase().includes(d));
 }
 
-// ─── FIX 2: MUCH STRONGER CLASSIFIER ─────────────────────────────────────────
-// Old classifier was too loose — blogs were slipping through as 'neutral'.
-// Now: if it's not clearly a TOOL homepage/product page, it's a blog.
+// ─── CLASSIFIER: added academic, career and dev domains as known resources ────
 function classifyUrl(url = '', title = '', snippet = '') {
   const text = `${url} ${title} ${snippet}`.toLowerCase();
   const domain = url.toLowerCase().replace(/^https?:\/\//, '').split('/')[0];
 
-  // ── KNOWN TOOL DOMAINS (direct match) ──
+  // ── KNOWN TOOL / RESOURCE DOMAINS ──
   const knownToolDomains = [
+    // Design / Creative tools
     'canva.com', 'runway.ml', 'midjourney.com', 'openai.com', 'stability.ai',
     'adobe.com', 'figma.com', 'notion.so', 'airtable.com', 'zapier.com',
     'huggingface.co', 'replicate.com', 'leonardo.ai', 'ideogram.ai',
     'firefly.adobe.com', 'bing.com', 'copilot.microsoft.com',
     'nightcafe.studio', 'craiyon.com', 'dreamstudio.ai', 'perchance.org',
     'picsart.com', 'fotor.com', 'pixlr.com', 'remove.bg', 'cleanup.pictures',
+    // Developer tools
+    'github.com', 'stackoverflow.com', 'npmjs.com', 'pypi.org',
+    'devdocs.io', 'readthedocs.io', 'replit.com', 'codepen.io',
+    'vercel.com', 'netlify.com', 'heroku.com', 'railway.app',
+    // Academic sources
+    'arxiv.org', 'pubmed.ncbi.nlm.nih.gov', 'scholar.google.com',
+    'researchgate.net', 'semanticscholar.org', 'jstor.org',
+    'springer.com', 'nature.com', 'ieee.org', 'acm.org', 'sciencedirect.com',
+    'doaj.org', 'ncbi.nlm.nih.gov', 'biorxiv.org', 'ssrn.com',
+    // Career / Job platforms
+    'indeed.com', 'glassdoor.com', 'linkedin.com', 'internshala.com',
+    'naukri.com', 'wellfound.com', 'levels.fyi', 'handshake.com',
+    'simplyhired.com', 'ziprecruiter.com', 'monster.com', 'shine.com',
+    // Education platforms
+    'khanacademy.org', 'coursera.org', 'edx.org', 'udemy.com',
+    'teacherspayteachers.com', 'quizlet.com', 'kahoot.com',
+    'duolingo.com', 'brilliant.org',
   ];
   if (knownToolDomains.some(d => domain.includes(d))) return 'tool';
 
-  // ── STRONG TOOL SIGNALS (product pages) ──
+  // ── STRONG TOOL SIGNALS ──
   const toolUrlSignals = ['/pricing', '/features', '/product', '/app', '/studio', '/dashboard', '/playground', '/generate'];
   const toolTextSignals = ['try for free', 'sign up free', 'get started free', 'free plan', 'no credit card', 'create an account', 'start for free', 'free tier', 'free credits'];
 
   const hasToolUrl = toolUrlSignals.some(p => url.toLowerCase().includes(p));
   const hasToolText = toolTextSignals.some(p => text.includes(p));
-
   if (hasToolUrl || hasToolText) return 'tool';
 
   // ── STRONG BLOG SIGNALS ──
@@ -64,31 +80,27 @@ function classifyUrl(url = '', title = '', snippet = '') {
   const blogTitleSignals = ['top 10', 'top 5', '10 best', '15 best', 'best free', 'roundup', 'list of', 'alternatives to', 'vs ', ' vs'];
 
   const isBlogDomain = blogDomains.some(d => text.includes(d));
-  const isBlogUrl = blogUrlSignals.some(p => url.toLowerCase().includes(p));
-  const isBlogTitle = blogTitleSignals.some(p => title.toLowerCase().includes(p));
+  const isBlogUrl    = blogUrlSignals.some(p => url.toLowerCase().includes(p));
+  const isBlogTitle  = blogTitleSignals.some(p => title.toLowerCase().includes(p));
 
   if (isBlogDomain || (isBlogUrl && !hasToolUrl) || isBlogTitle) return 'blog';
 
-  // Default: neutral (could be docs, wikipedia, academic, etc.)
   return 'neutral';
 }
 
-// ─── FIX 3: SMARTER QUERY ENHANCEMENT ────────────────────────────────────────
-// Add "site:*.io OR site:*.com -reddit -facebook" style hints via text
+// ─── QUERY ENHANCER: fixed researcher/jobseeker — removed "tool" keyword ──────
 function enhanceQuery(query, personaId) {
   const base = {
-    student:      `${query} free tool`,
-    researcher:   `${query} research academic tool`,
-    developer:    `${query} api github documentation`,
+    student:      `${query} free beginner`,
+    researcher:   `${query} academic paper study`,
+    developer:    `${query} github documentation api`,
     professional: `${query} enterprise platform`,
-    entrepreneur: `${query} startup tool pricing`,
-    creative:     `${query} free design tool`,
-    educator:     `${query} free for teachers tool`,
-    jobseeker:    `${query} career tool free`,
+    entrepreneur: `${query} startup saas`,
+    creative:     `${query} free design`,
+    educator:     `${query} free classroom teaching`,
+    jobseeker:    `${query} job internship apply`,
   };
-  // Append exclusions to push Tavily away from social/blog results
-  const enhanced = (base[personaId] || query) + ' -reddit -facebook -quora -medium';
-  return enhanced;
+  return (base[personaId] || query) + ' -reddit -facebook -quora -medium';
 }
 
 app.post('/api/search', async (req, res) => {
@@ -98,30 +110,54 @@ app.post('/api/search', async (req, res) => {
   const TAVILY_KEY = process.env.TAVILY_API_KEY;
   const GEMINI_KEY = process.env.GEMINI_API_KEY;
 
-  if (!TAVILY_KEY || !GEMINI_KEY) {
-    return res.status(500).json({ error: 'API keys not configured. Check your .env file.' });
+  if (!TAVILY_KEY) {
+    return res.status(500).json({ error: 'TAVILY_API_KEY is missing. Add it in your .env file or Vercel environment variables.' });
+  }
+  if (!GEMINI_KEY) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY is missing. Add it in your .env file or Vercel environment variables.' });
   }
 
   try {
     const enhancedQuery = enhanceQuery(query, persona.id);
     console.log(`\n[Search] Query: "${query}" → Enhanced: "${enhancedQuery}" | Persona: ${persona.id}`);
 
-    // STEP 1 — Fetch from Tavily (ask for more so we have room to filter)
-    const tavilyRes = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${TAVILY_KEY}` },
-      body: JSON.stringify({
-        query: enhancedQuery,
-        max_results: 25,
-        search_depth: 'basic',
-        include_answer: false,
-        include_raw_content: false,
-      }),
-    });
+    // STEP 1 — Fetch from Tavily (native fetch, 8s timeout for Vercel)
+    let tavilyRes;
+    try {
+      tavilyRes = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${TAVILY_KEY}`,
+        },
+        body: JSON.stringify({
+          query: enhancedQuery,
+          max_results: 25,
+          search_depth: 'basic',
+          include_answer: false,
+          include_raw_content: false,
+        }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch (tavilyErr) {
+      console.error('[Tavily Fetch Error]', tavilyErr.message);
+      return res.status(500).json({
+        error: `Tavily request failed: ${tavilyErr.message}`,
+        hint: 'Check that TAVILY_API_KEY is set correctly in Vercel environment variables and redeploy.',
+      });
+    }
 
     if (!tavilyRes.ok) {
       const err = await tavilyRes.text();
-      throw new Error(`Tavily error ${tavilyRes.status}: ${err}`);
+      console.error('[Tavily API Error]', tavilyRes.status, err);
+      return res.status(500).json({
+        error: `Tavily API error ${tavilyRes.status}: ${err}`,
+        hint: tavilyRes.status === 401
+          ? 'Invalid TAVILY_API_KEY — check it in Vercel environment variables.'
+          : tavilyRes.status === 429
+          ? 'Tavily rate limit hit — free tier allows 1000 searches/month.'
+          : 'Tavily API error — check Vercel function logs.',
+      });
     }
 
     const tavilyData = await tavilyRes.json();
@@ -131,7 +167,7 @@ app.post('/api/search', async (req, res) => {
       return res.json({ results: [], query, persona: persona.id, totalFetched: 0 });
     }
 
-    // STEP 2 — FILTER OUT blacklisted domains BEFORE sending to Gemini
+    // STEP 2 — Filter blacklisted domains
     const filtered = rawResults.filter(r => !isBlacklisted(r.url));
     console.log(`[Filter] Removed ${rawResults.length - filtered.length} blacklisted results. Remaining: ${filtered.length}`);
 
@@ -139,7 +175,7 @@ app.post('/api/search', async (req, res) => {
       return res.json({ results: [], query, persona: persona.id, totalFetched: rawResults.length });
     }
 
-    // STEP 3 — Classify remaining results
+    // STEP 3 — Classify
     const classified = filtered.map((r, i) => ({
       index: i,
       type: classifyUrl(r.url, r.title, r.content || ''),
@@ -148,75 +184,108 @@ app.post('/api/search', async (req, res) => {
       snippet: r.content?.slice(0, 350) || '',
     }));
 
-    const toolCount = classified.filter(r => r.type === 'tool').length;
-    const blogCount = classified.filter(r => r.type === 'blog').length;
+    const toolCount    = classified.filter(r => r.type === 'tool').length;
+    const blogCount    = classified.filter(r => r.type === 'blog').length;
     const neutralCount = classified.filter(r => r.type === 'neutral').length;
     console.log(`[Classify] Tools: ${toolCount} | Blogs: ${blogCount} | Neutral: ${neutralCount}`);
 
-    const isToolQuery = /tool|app|software|platform|generator|maker|editor|builder|website/i.test(query);
-
-    // STEP 4 — Gemini re-ranking prompt
+    // ─── STEP 4 — UNIVERSAL Gemini ranking prompt ─────────────────────────────
     const rankingPrompt = `You are a search result re-ranking engine. Rank the top 10 results for a "${persona.label}" who searched: "${query}".
 
+PERSONA: ${persona.label}
 PERSONA NEEDS: ${persona.context}
 
-STRICT SCORING RULES:
-${isToolQuery
-  ? `- This is a TOOL query. Actual product/tool websites MUST score 0.80–1.0.
-- Blog articles (type="blog") MUST score 0.05–0.35 and rank at the BOTTOM or be excluded.
-- If a blog is about the topic but is not a tool itself, it is LOW priority.`
-  : `- Score by how directly useful the result is for the persona's actual needs.`}
-- type="tool" with free tier mentioned: score 0.88–1.0 (especially for Student persona).
-- type="tool" without free tier: score 0.75–0.90.
-- type="neutral" (docs, academic, wiki): score 0.45–0.70.
-- type="blog": score 0.05–0.35 maximum. Always rank below tools and neutral.
-- SPREAD scores — do not cluster everything at the same value. Top result must be 0.85+, bottom must be under 0.40.
-- personaSnippet: one sentence explaining WHY this helps this specific persona. Mention "free" if the tool has a free tier.
+UNIVERSAL SCORING RULES (apply for ALL query types, ALL personas):
+
+1. Score based on how useful the result is FOR THIS SPECIFIC PERSONA — not just topic relevance.
+   Examples of persona-aware thinking:
+   - Student searching "research papers" → free/open-access papers score highest (arXiv, PubMed free), paywalled sites score low
+   - Student searching "internship" → free job boards, beginner-friendly career guides score highest
+   - Job seeker searching "AI tools" → tools that help with resume/portfolio score highest
+   - Developer searching "design" → CSS libraries, code-based design tools, GitHub repos score highest
+   - Researcher searching "image generator" → academic/research-grade tools, papers about the topic score highest
+   Always interpret the query through the lens of what THIS persona actually needs.
+
+2. BLOG HARD LIMIT — include a maximum of 2 blog/article results in your output.
+   - If you have more than 2 blogs, drop the lowest-scoring ones entirely
+   - The 2 blogs you keep must be genuinely exceptional for this persona
+   - All blogs MUST be ranked 9th or 10th — never in the top 8
+
+3. Score distribution:
+   - type="tool" strongly matching persona needs: 0.85–1.0
+   - type="tool" partially matching: 0.72–0.85
+   - type="neutral" (docs, academic, official, wiki, job boards) matching persona: 0.75–0.95
+   - type="blog" (max 2 total): 0.20–0.42, always 9th or 10th position
+   - SPREAD scores — top result must be 0.88+, bottom blog under 0.40
+   - Do NOT cluster everything at 0.55 — differentiate clearly
+
+4. personaSnippet: one sentence explaining why this result helps THIS specific persona.
+   Good examples:
+   - Student + arXiv paper: "Free open-access paper, no subscription needed."
+   - Job seeker + resume builder: "Free resume templates you can edit and download instantly."
+   - Developer + GitHub repo: "Open-source library with full docs and code examples."
+   - Researcher + journal: "Peer-reviewed study directly relevant to your research query."
 
 RESULTS TO RANK:
 ${JSON.stringify(classified, null, 2)}
 
-Return JSON with a "results" array. Each item needs: index, personaSnippet, relevanceScore, tags (2–3 from: tool, free, premium, open-source, tutorial, academic, official, blog, beginner, advanced, documentation, community).`;
+Return JSON with a "results" array. Each item: index, personaSnippet, relevanceScore, tags (2–3 from: tool, free, premium, open-source, tutorial, academic, official, blog, beginner, advanced, documentation, community).`;
 
-    // STEP 5 — Call Gemini
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: rankingPrompt }] }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 2048,
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'OBJECT',
-              properties: {
-                results: {
-                  type: 'ARRAY',
-                  items: {
-                    type: 'OBJECT',
-                    properties: {
-                      index:          { type: 'INTEGER' },
-                      personaSnippet: { type: 'STRING' },
-                      relevanceScore: { type: 'NUMBER' },
-                      tags:           { type: 'ARRAY', items: { type: 'STRING' } },
+    // STEP 5 — Call Gemini (native fetch, 8s timeout for Vercel)
+    let geminiRes;
+    try {
+      geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: rankingPrompt }] }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 2048,
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: 'OBJECT',
+                properties: {
+                  results: {
+                    type: 'ARRAY',
+                    items: {
+                      type: 'OBJECT',
+                      properties: {
+                        index:          { type: 'INTEGER' },
+                        personaSnippet: { type: 'STRING' },
+                        relevanceScore: { type: 'NUMBER' },
+                        tags:           { type: 'ARRAY', items: { type: 'STRING' } },
+                      },
+                      required: ['index', 'personaSnippet', 'relevanceScore', 'tags'],
                     },
-                    required: ['index', 'personaSnippet', 'relevanceScore', 'tags'],
                   },
                 },
+                required: ['results'],
               },
-              required: ['results'],
             },
-          },
-        }),
-      }
-    );
+          }),
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+    } catch (geminiErr) {
+      console.error('[Gemini Fetch Error]', geminiErr.message);
+      return res.status(500).json({
+        error: `Gemini request failed: ${geminiErr.message}`,
+        hint: 'Check that GEMINI_API_KEY is set correctly in Vercel environment variables and redeploy.',
+      });
+    }
 
     if (!geminiRes.ok) {
       const err = await geminiRes.text();
-      throw new Error(`Gemini error ${geminiRes.status}: ${err}`);
+      console.error('[Gemini API Error]', geminiRes.status, err);
+      return res.status(500).json({
+        error: `Gemini API error ${geminiRes.status}: ${err}`,
+        hint: geminiRes.status === 400
+          ? 'Invalid GEMINI_API_KEY — check it in Vercel environment variables.'
+          : 'Gemini API error — check Vercel function logs.',
+      });
     }
 
     const geminiData = await geminiRes.json();
@@ -233,41 +302,86 @@ Return JSON with a "results" array. Each item needs: index, personaSnippet, rele
       reranked = classified.slice(0, 10).map((r) => ({
         index: r.index,
         personaSnippet: `Relevant result for ${persona.label}.`,
-        relevanceScore: r.type === 'tool' ? 0.85 : r.type === 'blog' ? 0.20 : 0.55,
+        relevanceScore: r.type === 'tool' ? 0.85 : r.type === 'blog' ? 0.25 : 0.65,
         tags: r.type === 'tool' ? ['tool'] : r.type === 'blog' ? ['blog'] : ['neutral'],
       }));
     }
 
-    // STEP 6 — Post-process: enforce hard score rules regardless of what Gemini returned
+    // ─── STEP 6 — POST-PROCESSING: universal persona boosts + hard 2-blog cap ──
     reranked = reranked.map((r) => {
-      const original = filtered[r.index];  // ← use filtered[], not rawResults[]
+      const original = filtered[r.index];
       if (!original) return null;
 
       const type = classifyUrl(original.url, original.title, original.content || '');
+      const text = `${original.title} ${original.content || ''}`.toLowerCase();
+      const mentionsFree = /free|no cost|open.source|gratis|free tier|free plan/i.test(text);
       let score = r.relevanceScore;
 
-      // Hard rules — these override Gemini
-      if (isToolQuery && type === 'blog') {
-        score = Math.min(score, 0.35);  // blogs hard-capped at 35% for tool queries
-      }
-      if (type === 'tool') {
-        score = Math.max(score, 0.75);  // tool pages always at least 75%
+      // ── Hard floor/cap by type (applies to ALL personas) ──
+      if (type === 'blog') score = Math.min(score, 0.42);
+      if (type === 'tool') score = Math.max(score, 0.72);
+
+      // ── Persona-specific boosts (work for ANY query topic) ──
+      if (persona.id === 'student') {
+        if (mentionsFree && type === 'tool') score = Math.max(score, 0.90);
+        if (/arxiv|biorxiv|doaj|unpaywall|pmc|pubmed|open.*access/i.test(text)) score = Math.max(score, 0.85);
+        if (type === 'neutral' && /tutorial|beginner|intro|guide|learn|course|free/i.test(text)) score = Math.max(score, 0.78);
+        if (type === 'blog') score = Math.min(score, 0.38);
       }
 
-      // Student bonus for free tools
-      const mentionsFree = /free|no cost|open.source|gratis/i.test(`${original.title} ${original.content}`);
-      if (persona.id === 'student' && mentionsFree && type === 'tool') {
-        score = Math.min(Math.max(score, 0.88), 1.0);
+      if (persona.id === 'researcher') {
+        if (/arxiv\.org|pubmed|scholar\.google|researchgate|springer|nature\.com|jstor|ieee\.org|acm\.org|semanticscholar|sciencedirect|biorxiv|ssrn/.test(original.url)) score = Math.max(score, 0.92);
+        if (type === 'neutral') score = Math.max(score, 0.72);
+        if (type === 'blog') score = Math.min(score, 0.30);
+      }
+
+      if (persona.id === 'jobseeker') {
+        if (/indeed\.com|glassdoor|linkedin\.com|internshala|naukri|wellfound|levels\.fyi|handshake|simplyhired|ziprecruiter|monster\.com|shine\.com/.test(original.url)) score = Math.max(score, 0.92);
+        if (/resume|cv|cover.letter|interview|internship|job.board|career|placement/i.test(text) && type !== 'blog') score = Math.max(score, 0.80);
+        if (mentionsFree && type === 'tool') score = Math.max(score, 0.85);
+      }
+
+      if (persona.id === 'developer') {
+        if (/github\.com|stackoverflow\.com|developer\.|docs\.|npmjs\.com|pypi\.org|devdocs|mdn|readthedocs|replit\.com|codepen\.io/.test(original.url)) score = Math.max(score, 0.92);
+        if (type === 'neutral') score = Math.max(score, 0.70);
+        if (type === 'blog') score = Math.min(score, 0.35);
+      }
+
+      if (persona.id === 'educator') {
+        if (/\.edu\/|khanacademy|coursera|edx|teacherspayteachers|quizlet|kahoot|google.*classroom|brilliant\.org/.test(original.url)) score = Math.max(score, 0.90);
+        if (mentionsFree && type === 'tool') score = Math.max(score, 0.85);
+      }
+
+      if (persona.id === 'creative') {
+        if (/figma|canva|dribbble|behance|unsplash|adobe|coolors|fontpair|mobbin|pexels|freepik/.test(original.url)) score = Math.max(score, 0.90);
+        if (mentionsFree && type === 'tool') score = Math.max(score, 0.85);
+      }
+
+      if (persona.id === 'entrepreneur') {
+        if (type === 'tool' && mentionsFree) score = Math.max(score, 0.85);
+        if (/producthunt|indiehackers|ycombinator|crunchbase/.test(original.url)) score = Math.max(score, 0.80);
+        if (type === 'blog') score = Math.min(score, 0.38);
+      }
+
+      if (persona.id === 'professional') {
+        if (type === 'tool') score = Math.max(score, 0.78);
+        if (type === 'blog') score = Math.min(score, 0.35);
       }
 
       return { ...r, relevanceScore: parseFloat(score.toFixed(2)), _type: type };
-    }).filter(Boolean);  // remove nulls from missing indices
+    }).filter(Boolean);
 
-    // STEP 7 — Sort, slice top 10, assign ranks
+    // Sort by score descending
     reranked.sort((a, b) => b.relevanceScore - a.relevanceScore);
+
+    // ── HARD ENFORCE: max 2 blogs, always at the bottom ──
+    const nonBlogs = reranked.filter(r => r._type !== 'blog');
+    const blogs    = reranked.filter(r => r._type === 'blog').slice(0, 2);
+    reranked = [...nonBlogs.slice(0, 8), ...blogs];
 
     const highRelevanceCount = reranked.filter(r => r.relevanceScore >= 0.75).length;
 
+    // STEP 7 — Build final response
     const finalResults = reranked.slice(0, 10).map((r, i) => {
       const original = filtered[r.index] || {};
       return {
@@ -278,12 +392,12 @@ Return JSON with a "results" array. Each item needs: index, personaSnippet, rele
         originalSnippet: original.content?.slice(0, 250) || '',
         personaSnippet: r.personaSnippet || '',
         relevanceScore: r.relevanceScore,
-        resultType: r._type || 'neutral',  // expose type to frontend
+        resultType: r._type || 'neutral',
         tags: r.tags || [],
       };
     });
 
-    console.log(`[Done] Top: "${finalResults[0]?.title}" (${finalResults[0]?.relevanceScore}) | High-relevance: ${highRelevanceCount}`);
+    console.log(`[Done] Top: "${finalResults[0]?.title}" (${finalResults[0]?.relevanceScore}) | High-relevance: ${highRelevanceCount} | Blogs: ${blogs.length}`);
     res.json({
       results: finalResults,
       query,
@@ -295,7 +409,10 @@ Return JSON with a "results" array. Each item needs: index, personaSnippet, rele
 
   } catch (err) {
     console.error('[Search Error]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: err.message,
+      hint: 'Check Vercel function logs for details.',
+    });
   }
 });
 
