@@ -15,7 +15,7 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/search', (req, res) => {
-  res.status(405).json({ 
+  res.status(405).json({
     error: 'Method Not Allowed',
     hint: 'Use POST /api/search with { "query": "...", "persona": {...} } in the request body',
     example: {
@@ -91,8 +91,8 @@ function classifyUrl(url = '', title = '', snippet = '') {
   const blogTitleSignals = ['top 10', 'top 5', '10 best', '15 best', 'best free', 'roundup', 'list of', 'alternatives to', 'vs ', ' vs'];
 
   const isBlogDomain = blogDomains.some(d => text.includes(d));
-  const isBlogUrl    = blogUrlSignals.some(p => url.toLowerCase().includes(p));
-  const isBlogTitle  = blogTitleSignals.some(p => title.toLowerCase().includes(p));
+  const isBlogUrl = blogUrlSignals.some(p => url.toLowerCase().includes(p));
+  const isBlogTitle = blogTitleSignals.some(p => title.toLowerCase().includes(p));
 
   if (isBlogDomain || (isBlogUrl && !hasToolUrl) || isBlogTitle) return 'blog';
 
@@ -102,14 +102,14 @@ function classifyUrl(url = '', title = '', snippet = '') {
 // ─── QUERY ENHANCER: fixed researcher/jobseeker — removed "tool" keyword ──────
 function enhanceQuery(query, personaId) {
   const base = {
-    student:      `${query} free beginner`,
-    researcher:   `${query} academic paper study`,
-    developer:    `${query} github documentation api`,
+    student: `${query} free beginner`,
+    researcher: `${query} academic paper study`,
+    developer: `${query} github documentation api`,
     professional: `${query} enterprise platform`,
     entrepreneur: `${query} startup saas`,
-    creative:     `${query} free design`,
-    educator:     `${query} free classroom teaching`,
-    jobseeker:    `${query} job internship apply`,
+    creative: `${query} free design`,
+    educator: `${query} free classroom teaching`,
+    jobseeker: `${query} job internship apply`,
   };
   return (base[personaId] || query) + ' -reddit -facebook -quora -medium';
 }
@@ -148,7 +148,7 @@ app.post('/api/search', async (req, res) => {
           include_answer: false,
           include_raw_content: false,
         }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(30000),
       });
     } catch (tavilyErr) {
       console.error('[Tavily Fetch Error]', tavilyErr.message);
@@ -166,8 +166,8 @@ app.post('/api/search', async (req, res) => {
         hint: tavilyRes.status === 401
           ? 'Invalid TAVILY_API_KEY — check it in Vercel environment variables.'
           : tavilyRes.status === 429
-          ? 'Tavily rate limit hit — free tier allows 1000 searches/month.'
-          : 'Tavily API error — check Vercel function logs.',
+            ? 'Tavily rate limit hit — free tier allows 1000 searches/month.'
+            : 'Tavily API error — check Vercel function logs.',
       });
     }
 
@@ -195,8 +195,8 @@ app.post('/api/search', async (req, res) => {
       snippet: r.content?.slice(0, 350) || '',
     }));
 
-    const toolCount    = classified.filter(r => r.type === 'tool').length;
-    const blogCount    = classified.filter(r => r.type === 'blog').length;
+    const toolCount = classified.filter(r => r.type === 'tool').length;
+    const blogCount = classified.filter(r => r.type === 'blog').length;
     const neutralCount = classified.filter(r => r.type === 'neutral').length;
     console.log(`[Classify] Tools: ${toolCount} | Blogs: ${blogCount} | Neutral: ${neutralCount}`);
 
@@ -264,10 +264,10 @@ Return JSON with a "results" array. Each item: index, personaSnippet, relevanceS
                     items: {
                       type: 'OBJECT',
                       properties: {
-                        index:          { type: 'INTEGER' },
+                        index: { type: 'INTEGER' },
                         personaSnippet: { type: 'STRING' },
                         relevanceScore: { type: 'NUMBER' },
-                        tags:           { type: 'ARRAY', items: { type: 'STRING' } },
+                        tags: { type: 'ARRAY', items: { type: 'STRING' } },
                       },
                       required: ['index', 'personaSnippet', 'relevanceScore', 'tags'],
                     },
@@ -277,7 +277,7 @@ Return JSON with a "results" array. Each item: index, personaSnippet, relevanceS
               },
             },
           }),
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(40000),
         }
       );
     } catch (geminiErr) {
@@ -387,7 +387,7 @@ Return JSON with a "results" array. Each item: index, personaSnippet, relevanceS
 
     // ── HARD ENFORCE: max 2 blogs, always at the bottom ──
     const nonBlogs = reranked.filter(r => r._type !== 'blog');
-    const blogs    = reranked.filter(r => r._type === 'blog').slice(0, 2);
+    const blogs = reranked.filter(r => r._type === 'blog').slice(0, 2);
     reranked = [...nonBlogs.slice(0, 8), ...blogs];
 
     const highRelevanceCount = reranked.filter(r => r.relevanceScore >= 0.75).length;
