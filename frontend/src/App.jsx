@@ -100,7 +100,7 @@ export default function App() {
   const inputRef = useRef(null)
 
   const handleSearch = async () => {
-    if (!query.trim()) { inputRef.current?.focus(); return }
+    if (!query.trim()) { setError('Enter a search query'); inputRef.current?.focus(); return }
     if (!selectedPersona) { setError('Please select your persona first'); return }
 
     setLoading(true)
@@ -109,13 +109,26 @@ export default function App() {
     setSearched(true)
 
     try {
+      const requestBody = { query: query.trim(), persona: selectedPersona }
+      
       const res = await fetch(`${BACKEND_URL}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: query.trim(), persona: selectedPersona }),
+        body: JSON.stringify(requestBody),
       })
+      
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Search failed')
+      
+      if (!res.ok) {
+        const hint = data.hint || ''
+        const errorMsg = res.status === 400 
+          ? `Invalid request: ${data.error || 'query and persona are required'}`
+          : res.status === 500
+          ? `Server error: ${data.error}. ${hint}`
+          : data.error || `Search failed (${res.status})`
+        throw new Error(errorMsg)
+      }
+      
       setResults(data.results || [])
       setMeta({
         totalFetched: data.totalFetched,
@@ -123,7 +136,7 @@ export default function App() {
         highRelevanceCount: data.highRelevanceCount,
       })
     } catch (err) {
-      setError(err.message)
+      setError(err.message || 'Network or server error. Make sure backend is running on http://localhost:3001')
     } finally {
       setLoading(false)
     }
@@ -249,7 +262,7 @@ export default function App() {
 
             <div className="results-list">
               {results.map((r) => {
-                // FIX: use resultType from backend — reliable, not score-threshold based
+                // FIX: use resultType from backend — not score threshold
                 const isBlog = r.resultType === 'blog'
                 return (
                   <div key={r.rank} className={`result-card ${isBlog ? 'result-card-dim' : ''}`}>

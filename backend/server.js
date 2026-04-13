@@ -14,6 +14,17 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.get('/api/search', (req, res) => {
+  res.status(405).json({ 
+    error: 'Method Not Allowed',
+    hint: 'Use POST /api/search with { "query": "...", "persona": {...} } in the request body',
+    example: {
+      query: 'AI tools',
+      persona: { id: 'student', label: 'Student', context: '...' }
+    }
+  });
+});
+
 // ─── BLACKLIST: removed linkedin.com so job seekers get results ───────────────
 const BLACKLISTED_DOMAINS = [
   'facebook.com', 'reddit.com', 'twitter.com', 'x.com',
